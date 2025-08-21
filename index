@@ -1,0 +1,1138 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Minus, Package, AlertTriangle, Search, Calendar, TrendingUp, TrendingDown, User, Users, BarChart3, Download, Upload, Moon, Sun, Edit, Trash2, Eye, Filter, X, Save, FileText, PieChart, Settings, Zap, CheckCircle } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RechartsPieChart, Cell, LineChart, Line } from 'recharts';
+
+const ControleEstoque = () => {
+  const [materiais, setMateriais] = useState([]);
+  const [historico, setHistorico] = useState([]);
+  const [busca, setBusca] = useState('');
+  const [aba, setAba] = useState('dashboard');
+  const [modoEscuro, setModoEscuro] = useState(false);
+  const [materialEditando, setMaterialEditando] = useState(null);
+  const [modalConfirmacao, setModalConfirmacao] = useState({ ativo: false, materialId: null });
+  const [filtros, setFiltros] = useState({
+    categoria: '',
+    dataInicio: '',
+    dataFim: '',
+    responsavel: '',
+    tipo: ''
+  });
+  const fileInputRef = useRef(null);
+
+  const [novoMaterial, setNovoMaterial] = useState({
+    nome: '',
+    categoria: '',
+    quantidade: 0,
+    estoqueMinimo: 5,
+    codigo: ''
+  });
+
+  const [movimentacao, setMovimentacao] = useState({
+    materialId: '',
+    tipo: 'entrada',
+    quantidade: 0,
+    observacao: '',
+    responsavel: ''
+  });
+
+  const categorias = [
+    'Papel e Cadernos',
+    'Canetas e Lápis',
+    'Material de Arte',
+    'Material de Escritório',
+    'Livros e Apostilas',
+    'Eletrônicos',
+    'Outros'
+  ];
+
+  const cores = ['#8884d8', '#82ca9d', '#ffc658', '#ff7c7c', '#8dd1e1', '#d084d0', '#ffb347'];
+
+  // Carregar dados e configurações
+  useEffect(() => {
+    const materiaisArmazenados = localStorage.getItem('materiaisEscolares');
+    const historicoArmazenado = localStorage.getItem('historicoMovimentacao');
+    const modoEscuroArmazenado = localStorage.getItem('modoEscuro');
+    
+    if (materiaisArmazenados) setMateriais(JSON.parse(materiaisArmazenados));
+    if (historicoArmazenado) setHistorico(JSON.parse(historicoArmazenado));
+    if (modoEscuroArmazenado) setModoEscuro(JSON.parse(modoEscuroArmazenado));
+  }, []);
+
+  // Salvar dados
+  useEffect(() => {
+    localStorage.setItem('materiaisEscolares', JSON.stringify(materiais));
+  }, [materiais]);
+
+  useEffect(() => {
+    localStorage.setItem('historicoMovimentacao', JSON.stringify(historico));
+  }, [historico]);
+
+  useEffect(() => {
+    localStorage.setItem('modoEscuro', JSON.stringify(modoEscuro));
+  }, [modoEscuro]);
+
+  // Atalhos de teclado
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key) {
+          case 'd':
+            e.preventDefault();
+            setAba('dashboard');
+            break;
+          case 'e':
+            e.preventDefault();
+            setAba('estoque');
+            break;
+          case 'm':
+            e.preventDefault();
+            setAba('movimentacao');
+            break;
+          case 's':
+            e.preventDefault();
+            exportarDados();
+            break;
+          case 'l':
+            e.preventDefault();
+            setModoEscuro(!modoEscuro);
+            break;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [modoEscuro]);
+
+  const gerarCodigo = () => {
+    return 'MAT' + Date.now().toString().slice(-6);
+  };
+
+  const adicionarMaterial = () => {
+    if (!novoMaterial.nome || !novoMaterial.categoria) return;
+
+    const material = {
+      id: Date.now(),
+      ...novoMaterial,
+      codigo: novoMaterial.codigo || gerarCodigo(),
+      quantidade: parseInt(novoMaterial.quantidade),
+      estoqueMinimo: parseInt(novoMaterial.estoqueMinimo),
+      dataAtualizacao: new Date().toISOString(),
+      dataCriacao: new Date().toISOString()
+    };
+
+    setMateriais([...materiais, material]);
+    
+    const registro = {
+      id: Date.now(),
+      materialId: material.id,
+      materialNome: material.nome,
+      tipo: 'estoque_inicial',
+      quantidade: material.quantidade,
+      quantidadeAnterior: 0,
+      quantidadeAtual: material.quantidade,
+      observacao: 'Cadastro inicial do material',
+      responsavel: 'Sistema',
+      data: new Date().toISOString()
+    };
+    setHistorico([...historico, registro]);
+
+    setNovoMaterial({ nome: '', categoria: '', quantidade: 0, estoqueMinimo: 5, codigo: '' });
+  };
+
+  const editarMaterial = (material) => {
+    setMaterialEditando(material);
+  };
+
+  const salvarEdicao = () => {
+    const materiaisAtualizados = materiais.map(m => 
+      m.id === materialEditando.id ? { ...materialEditando, dataAtualizacao: new Date().toISOString() } : m
+    );
+    setMateriais(materiaisAtualizados);
+    setMaterialEditando(null);
+  };
+
+  const confirmarDelecao = (materialId) => {
+    setModalConfirmacao({ ativo: true, materialId });
+  };
+
+  const deletarMaterial = () => {
+    const materiaisAtualizados = materiais.filter(m => m.id !== modalConfirmacao.materialId);
+    setMateriais(materiaisAtualizados);
+    setModalConfirmacao({ ativo: false, materialId: null });
+  };
+
+  const realizarMovimentacao = () => {
+    if (!movimentacao.materialId || movimentacao.quantidade <= 0) return;
+
+    const material = materiais.find(m => m.id == movimentacao.materialId);
+    if (!material) return;
+
+    const quantidade = parseInt(movimentacao.quantidade);
+    const quantidadeAnterior = material.quantidade;
+    let novaQuantidade;
+
+    if (movimentacao.tipo === 'entrada') {
+      novaQuantidade = quantidadeAnterior + quantidade;
+    } else {
+      novaQuantidade = Math.max(0, quantidadeAnterior - quantidade);
+    }
+
+    const materiaisAtualizados = materiais.map(m => 
+      m.id == movimentacao.materialId 
+        ? { ...m, quantidade: novaQuantidade, dataAtualizacao: new Date().toISOString() }
+        : m
+    );
+    setMateriais(materiaisAtualizados);
+
+    const registro = {
+      id: Date.now(),
+      materialId: material.id,
+      materialNome: material.nome,
+      materialCodigo: material.codigo,
+      tipo: movimentacao.tipo,
+      quantidade: quantidade,
+      quantidadeAnterior,
+      quantidadeAtual: novaQuantidade,
+      observacao: movimentacao.observacao,
+      responsavel: movimentacao.responsavel || 'Sistema',
+      data: new Date().toISOString()
+    };
+    setHistorico([...historico, registro]);
+
+    setMovimentacao({ materialId: '', tipo: 'entrada', quantidade: 0, observacao: '', responsavel: '' });
+  };
+
+  const exportarDados = () => {
+    const dados = {
+      materiais,
+      historico,
+      dataExportacao: new Date().toISOString(),
+      versao: '2.0'
+    };
+
+    const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `estoque-backup-${new Date().toISOString().split('T')[0]}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportarCSV = () => {
+    const csvContent = [
+      ['Código', 'Nome', 'Categoria', 'Quantidade', 'Estoque Mínimo', 'Status'],
+      ...materiais.map(m => [
+        m.codigo,
+        m.nome,
+        m.categoria,
+        m.quantidade,
+        m.estoqueMinimo,
+        m.quantidade === 0 ? 'Esgotado' : m.quantidade <= m.estoqueMinimo ? 'Estoque Baixo' : 'OK'
+      ])
+    ].map(row => row.join(',')).join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `estoque-${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importarDados = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const dados = JSON.parse(e.target.result);
+        if (dados.materiais && dados.historico) {
+          setMateriais(dados.materiais);
+          setHistorico(dados.historico);
+          alert('Dados importados com sucesso!');
+        }
+      } catch (error) {
+        alert('Erro ao importar dados. Verifique o formato do arquivo.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const aplicarFiltros = (lista) => {
+    return lista.filter(item => {
+      const dataItem = new Date(item.data || item.dataAtualizacao);
+      const dataInicio = filtros.dataInicio ? new Date(filtros.dataInicio) : null;
+      const dataFim = filtros.dataFim ? new Date(filtros.dataFim) : null;
+
+      return (
+        (!filtros.categoria || item.categoria === filtros.categoria) &&
+        (!filtros.responsavel || (item.responsavel && item.responsavel.toLowerCase().includes(filtros.responsavel.toLowerCase()))) &&
+        (!filtros.tipo || item.tipo === filtros.tipo) &&
+        (!dataInicio || dataItem >= dataInicio) &&
+        (!dataFim || dataItem <= dataFim)
+      );
+    });
+  };
+
+  const materiaisFiltrados = materiais.filter(material =>
+    (material.nome.toLowerCase().includes(busca.toLowerCase()) ||
+     material.categoria.toLowerCase().includes(busca.toLowerCase()) ||
+     material.codigo.toLowerCase().includes(busca.toLowerCase())) &&
+    (!filtros.categoria || material.categoria === filtros.categoria)
+  );
+
+  const materiaisEstoqueBaixo = materiais.filter(m => m.quantidade <= m.estoqueMinimo && m.quantidade > 0);
+  const materiaisAcabando = materiais.filter(m => m.quantidade <= 2 && m.quantidade > 0);
+  const materiaisEsgotados = materiais.filter(m => m.quantidade === 0);
+
+  const formatarData = (dataISO) => {
+    return new Date(dataISO).toLocaleString('pt-BR');
+  };
+
+  // Dados para gráficos
+  const dadosCategoria = categorias.map(cat => ({
+    categoria: cat,
+    quantidade: materiais.filter(m => m.categoria === cat).reduce((acc, m) => acc + m.quantidade, 0),
+    itens: materiais.filter(m => m.categoria === cat).length
+  })).filter(d => d.itens > 0);
+
+  const dadosMovimentacao = historico
+    .filter(h => h.tipo !== 'estoque_inicial')
+    .reduce((acc, mov) => {
+      const data = mov.data.split('T')[0];
+      const existing = acc.find(item => item.data === data);
+      if (existing) {
+        if (mov.tipo === 'entrada') existing.entradas += mov.quantidade;
+        else existing.saidas += mov.quantidade;
+      } else {
+        acc.push({
+          data,
+          entradas: mov.tipo === 'entrada' ? mov.quantidade : 0,
+          saidas: mov.tipo === 'saida' ? mov.quantidade : 0
+        });
+      }
+      return acc;
+    }, [])
+    .slice(-7);
+
+  const materiaisMaisUsados = materiais
+    .map(material => ({
+      ...material,
+      totalSaidas: historico
+        .filter(h => h.materialId === material.id && h.tipo === 'saida')
+        .reduce((acc, h) => acc + h.quantidade, 0)
+    }))
+    .sort((a, b) => b.totalSaidas - a.totalSaidas)
+    .slice(0, 5);
+
+  const theme = modoEscuro ? 'dark' : 'light';
+  const bgClass = modoEscuro ? 'bg-gray-900 text-white' : 'bg-white text-gray-900';
+  const cardClass = modoEscuro ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200';
+  const inputClass = modoEscuro ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900';
+
+  return (
+    <div className={`max-w-7xl mx-auto p-6 min-h-screen transition-colors ${bgClass}`}>
+      {/* Cabeçalho com logo */}
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold mb-2">Controle de Estoque</h1>
+          <p className="text-gray-600">Materiais Escolares - Depósito</p>
+        </div>
+        <div className="flex items-center space-x-4">
+          <div className="text-xs text-gray-500">
+            <p>Atalhos: Ctrl+D (Dashboard) | Ctrl+E (Estoque) | Ctrl+M (Movimentação)</p>
+            <p>Ctrl+S (Exportar) | Ctrl+L (Modo Escuro)</p>
+          </div>
+          <button
+            onClick={() => setModoEscuro(!modoEscuro)}
+            className="p-2 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors"
+          >
+            {modoEscuro ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          </button>
+          <img 
+            src="./src/assets/logo-sesi.png" 
+            alt="Escola SESI" 
+            className="h-16 w-auto"
+          />
+        </div>
+      </div>
+
+      {/* Navegação por abas */}
+      <div className="mb-6">
+        <div className={`flex space-x-1 p-1 rounded-lg ${modoEscuro ? 'bg-gray-800' : 'bg-gray-100'}`}>
+          {[
+            { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
+            { id: 'estoque', label: 'Estoque', icon: Package },
+            { id: 'movimentacao', label: 'Movimentação', icon: TrendingUp },
+            { id: 'retiradas', label: 'Retiradas', icon: Users },
+            { id: 'historico', label: 'Histórico', icon: Calendar },
+            { id: 'relatorios', label: 'Relatórios', icon: FileText }
+          ].map(tab => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setAba(tab.id)}
+                className={`px-4 py-2 rounded-md font-medium transition-colors flex items-center ${
+                  aba === tab.id 
+                    ? `${modoEscuro ? 'bg-gray-700 text-blue-400' : 'bg-white text-blue-600'} shadow-sm` 
+                    : `${modoEscuro ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-800'}`
+                }`}
+              >
+                <Icon className="w-4 h-4 mr-2" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Alertas críticos */}
+      {materiaisEsgotados.length > 0 && (
+        <div className="mb-4 p-4 bg-gradient-to-r from-red-100 to-red-50 border-l-4 border-red-600 rounded-lg shadow-sm">
+          <div className="flex items-center mb-3">
+            <AlertTriangle className="w-6 h-6 text-red-600 mr-2 animate-bounce" />
+            <h3 className="font-bold text-red-800 text-lg">🚨 CRÍTICO: {materiaisEsgotados.length} material(is) esgotado(s)!</h3>
+          </div>
+          <div className="space-y-2">
+            {materiaisEsgotados.map(material => (
+              <div key={material.id} className="bg-white p-3 rounded-md border border-red-300">
+                <span className="font-semibold text-red-800">{material.nome} ({material.codigo})</span>
+                <span className="ml-2 bg-red-600 text-white px-2 py-1 rounded-full text-sm font-bold">
+                  ESGOTADO
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {materiaisAcabando.length > 0 && (
+        <div className="mb-4 p-4 bg-gradient-to-r from-yellow-100 to-orange-50 border-l-4 border-yellow-500 rounded-lg shadow-sm">
+          <div className="flex items-center mb-3">
+            <AlertTriangle className="w-6 h-6 text-yellow-600 mr-2 animate-pulse" />
+            <h3 className="font-bold text-yellow-800 text-lg">⚡ URGENTE: {materiaisAcabando.length} material(is) acabando!</h3>
+          </div>
+          <div className="space-y-2">
+            {materiaisAcabando.map(material => (
+              <div key={material.id} className="bg-white p-3 rounded-md border border-yellow-300">
+                <div className="flex justify-between items-center">
+                  <span className="font-semibold text-yellow-800">{material.nome} ({material.codigo})</span>
+                  <span className="bg-yellow-500 text-white px-2 py-1 rounded-full text-sm font-bold">
+                    Apenas {material.quantidade} restantes!
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {materiaisEstoqueBaixo.length > 0 && (
+        <div className="mb-6 p-4 bg-gradient-to-r from-orange-50 to-red-50 border-l-4 border-orange-500 rounded-lg shadow-sm">
+          <div className="flex items-center mb-3">
+            <AlertTriangle className="w-6 h-6 text-orange-600 mr-2 animate-pulse" />
+            <h3 className="font-bold text-orange-800 text-lg">⚠️ ATENÇÃO: {materiaisEstoqueBaixo.length} item(ns) com estoque baixo!</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {materiaisEstoqueBaixo.map(material => (
+              <div key={material.id} className="bg-white p-3 rounded-md border border-orange-200">
+                <div className="flex justify-between items-center">
+                  <span className="font-semibold text-gray-800">{material.nome} ({material.codigo})</span>
+                  <span className="bg-red-100 text-red-800 px-2 py-1 rounded-full text-sm font-medium">
+                    {material.quantidade} restantes
+                  </span>
+                </div>
+                <p className="text-sm text-gray-600 mt-1">
+                  Mínimo necessário: {material.estoqueMinimo} unidades
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Aba Dashboard */}
+      {aba === 'dashboard' && (
+        <div className="space-y-6">
+          {/* Cards de resumo */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className={`p-6 rounded-lg shadow-sm ${cardClass}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Total de Materiais</p>
+                  <p className="text-3xl font-bold">{materiais.length}</p>
+                </div>
+                <Package className="w-12 h-12 text-blue-500" />
+              </div>
+            </div>
+
+            <div className={`p-6 rounded-lg shadow-sm ${cardClass}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Itens em Estoque</p>
+                  <p className="text-3xl font-bold">{materiais.reduce((acc, m) => acc + m.quantidade, 0)}</p>
+                </div>
+                <CheckCircle className="w-12 h-12 text-green-500" />
+              </div>
+            </div>
+
+            <div className={`p-6 rounded-lg shadow-sm ${cardClass}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Alertas Ativos</p>
+                  <p className="text-3xl font-bold text-red-500">
+                    {materiaisEsgotados.length + materiaisAcabando.length + materiaisEstoqueBaixo.length}
+                  </p>
+                </div>
+                <AlertTriangle className="w-12 h-12 text-red-500" />
+              </div>
+            </div>
+
+            <div className={`p-6 rounded-lg shadow-sm ${cardClass}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Movimentações Hoje</p>
+                  <p className="text-3xl font-bold">
+                    {historico.filter(h => h.data.startsWith(new Date().toISOString().split('T')[0])).length}
+                  </p>
+                </div>
+                <TrendingUp className="w-12 h-12 text-purple-500" />
+              </div>
+            </div>
+          </div>
+
+          {/* Gráficos */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className={`p-6 rounded-lg shadow-sm ${cardClass}`}>
+              <h3 className="text-lg font-semibold mb-4">Estoque por Categoria</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={dadosCategoria}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="categoria" angle={-45} textAnchor="end" height={80} />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="quantidade" fill="#8884d8" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className={`p-6 rounded-lg shadow-sm ${cardClass}`}>
+              <h3 className="text-lg font-semibold mb-4">Distribuição por Categoria</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <RechartsPieChart>
+                  <Tooltip />
+                  <RechartsPieChart data={dadosCategoria} cx="50%" cy="50%" outerRadius={80}>
+                    {dadosCategoria.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={cores[index % cores.length]} />
+                    ))}
+                  </RechartsPieChart>
+                </RechartsPieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Movimentações recentes */}
+          <div className={`p-6 rounded-lg shadow-sm ${cardClass}`}>
+            <h3 className="text-lg font-semibold mb-4">Movimentações dos Últimos 7 Dias</h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={dadosMovimentacao}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="data" />
+                <YAxis />
+                <Tooltip />
+                <Line type="monotone" dataKey="entradas" stroke="#82ca9d" name="Entradas" />
+                <Line type="monotone" dataKey="saidas" stroke="#ff7c7c" name="Saídas" />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Materiais mais utilizados */}
+          <div className={`p-6 rounded-lg shadow-sm ${cardClass}`}>
+            <h3 className="text-lg font-semibold mb-4">Top 5 Materiais Mais Utilizados</h3>
+            <div className="space-y-3">
+              {materiaisMaisUsados.map((material, index) => (
+                <div key={material.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                  <div className="flex items-center">
+                    <span className="font-bold text-lg mr-3 text-blue-600">#{index + 1}</span>
+                    <div>
+                      <p className="font-medium">{material.nome} ({material.codigo})</p>
+                      <p className="text-sm text-gray-500">{material.categoria}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-bold">{material.totalSaidas} retiradas</p>
+                    <p className="text-sm text-gray-500">{material.quantidade} em estoque</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Aba Estoque */}
+      {aba === 'estoque' && (
+        <div className="space-y-6">
+          {/* Cadastro de novo material */}
+          <div className={`p-6 rounded-lg ${cardClass}`}>
+            <h3 className="text-lg font-semibold mb-4">Cadastrar Novo Material</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              <input
+                type="text"
+                placeholder="Nome do material"
+                value={novoMaterial.nome}
+                onChange={(e) => setNovoMaterial({...novoMaterial, nome: e.target.value})}
+                className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+              />
+              <select
+                value={novoMaterial.categoria}
+                onChange={(e) => setNovoMaterial({...novoMaterial, categoria: e.target.value})}
+                className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+              >
+                <option value="">Selecione a categoria</option>
+                {categorias.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                placeholder="Código (opcional)"
+                value={novoMaterial.codigo}
+                onChange={(e) => setNovoMaterial({...novoMaterial, codigo: e.target.value})}
+                className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+              />
+              <input
+                type="number"
+                placeholder="Quantidade inicial"
+                value={novoMaterial.quantidade}
+                onChange={(e) => setNovoMaterial({...novoMaterial, quantidade: e.target.value})}
+                className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+              />
+              <input
+                type="number"
+                placeholder="Estoque mínimo"
+                value={novoMaterial.estoqueMinimo}
+                onChange={(e) => setNovoMaterial({...novoMaterial, estoqueMinimo: e.target.value})}
+                className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+              />
+            </div>
+            <button
+              onClick={adicionarMaterial}
+              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+            >
+              <Plus className="w-4 h-4 inline mr-2" />
+              Adicionar Material
+            </button>
+          </div>
+
+          {/* Filtros e busca */}
+          <div className={`p-4 rounded-lg ${cardClass}`}>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="relative">
+                <Search className="w-5 h-5 absolute left-3 top-3 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Buscar materiais..."
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  className={`w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+                />
+              </div>
+              <select
+                value={filtros.categoria}
+                onChange={(e) => setFiltros({...filtros, categoria: e.target.value})}
+                className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+              >
+                <option value="">Todas as categorias</option>
+                {categorias.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+              <button
+                onClick={exportarCSV}
+                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+              >
+                <Download className="w-4 h-4 inline mr-2" />
+                Exportar CSV
+              </button>
+              <div className="flex space-x-2">
+                <button
+                  onClick={exportarDados}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
+                >
+                  <Download className="w-4 h-4 inline mr-2" />
+                  Backup
+                </button>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={importarDados}
+                  ref={fileInputRef}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 transition-colors"
+                >
+                  <Upload className="w-4 h-4 inline mr-2" />
+                  Importar
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Lista de materiais */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {materiaisFiltrados.map(material => (
+              <div key={material.id} className={`border rounded-lg p-4 shadow-sm relative ${cardClass}`}>
+                <div className="flex justify-between items-start mb-3">
+                  <div className="flex-1">
+                    <h4 className="font-semibold">{material.nome}</h4>
+                    <p className="text-sm text-gray-500">Código: {material.codigo}</p>
+                  </div>
+                  <div className="flex space-x-1">
+                    <button
+                      onClick={() => editarMaterial(material)}
+                      className="p-1 text-blue-600 hover:bg-blue-100 rounded"
+                    >
+                      <Edit className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => confirmarDelecao(material.id)}
+                      className="p-1 text-red-600 hover:bg-red-100 rounded"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                
+                <p className="text-sm text-gray-600 mb-2">{material.categoria}</p>
+                
+                <div className="flex justify-between items-center mb-3">
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                    material.quantidade === 0 
+                      ? 'bg-red-100 text-red-800' 
+                      : material.quantidade <= material.estoqueMinimo 
+                        ? 'bg-yellow-100 text-yellow-800' 
+                        : 'bg-green-100 text-green-800'
+                  }`}>
+                    {material.quantidade} un.
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    Mín: {material.estoqueMinimo}
+                  </span>
+                </div>
+                
+                <div className="text-xs text-gray-500">
+                  <p>Criado: {formatarData(material.dataCriacao)}</p>
+                  <p>Atualizado: {formatarData(material.dataAtualizacao)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Aba Movimentação */}
+      {aba === 'movimentacao' && (
+        <div className={`p-6 rounded-lg ${cardClass}`}>
+          <h3 className="text-lg font-semibold mb-4">Registrar Entrada/Saída</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+            <select
+              value={movimentacao.materialId}
+              onChange={(e) => setMovimentacao({...movimentacao, materialId: e.target.value})}
+              className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+            >
+              <option value="">Selecione o material</option>
+              {materiais.map(material => (
+                <option key={material.id} value={material.id}>
+                  {material.nome} ({material.codigo}) - atual: {material.quantidade}
+                </option>
+              ))}
+            </select>
+            <select
+              value={movimentacao.tipo}
+              onChange={(e) => setMovimentacao({...movimentacao, tipo: e.target.value})}
+              className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+            >
+              <option value="entrada">Entrada (+)</option>
+              <option value="saida">Saída (-)</option>
+            </select>
+            <input
+              type="number"
+              placeholder="Quantidade"
+              value={movimentacao.quantidade}
+              onChange={(e) => setMovimentacao({...movimentacao, quantidade: e.target.value})}
+              className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+            />
+            <input
+              type="text"
+              placeholder="Responsável pela movimentação"
+              value={movimentacao.responsavel}
+              onChange={(e) => setMovimentacao({...movimentacao, responsavel: e.target.value})}
+              className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+            />
+            <input
+              type="text"
+              placeholder="Observação (opcional)"
+              value={movimentacao.observacao}
+              onChange={(e) => setMovimentacao({...movimentacao, observacao: e.target.value})}
+              className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+            />
+          </div>
+          <button
+            onClick={realizarMovimentacao}
+            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+          >
+            {movimentacao.tipo === 'entrada' ? (
+              <Plus className="w-4 h-4 inline mr-2" />
+            ) : (
+              <Minus className="w-4 h-4 inline mr-2" />
+            )}
+            Registrar {movimentacao.tipo === 'entrada' ? 'Entrada' : 'Saída'}
+          </button>
+        </div>
+      )}
+
+      {/* Aba Retiradas */}
+      {aba === 'retiradas' && (
+        <div>
+          <h3 className="text-lg font-semibold mb-4">Controle de Retiradas</h3>
+          <div className="space-y-3">
+            {historico
+              .filter(registro => registro.tipo === 'saida' && registro.responsavel)
+              .slice().reverse()
+              .map(registro => (
+              <div key={registro.id} className={`border rounded-lg p-4 shadow-sm ${cardClass}`}>
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="flex items-center mb-2">
+                      <User className="w-5 h-5 text-blue-600 mr-2" />
+                      <h4 className="font-semibold">{registro.responsavel}</h4>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-1">
+                      <span className="font-medium">Material:</span> {registro.materialNome} ({registro.materialCodigo})
+                    </p>
+                    <p className="text-sm text-gray-600 mb-1">
+                      <span className="font-medium">Quantidade retirada:</span> {registro.quantidade} unidades
+                    </p>
+                    <p className="text-sm text-gray-600 mb-1">
+                      <span className="font-medium">Estoque atual:</span> {registro.quantidadeAtual} unidades
+                    </p>
+                    {registro.observacao && (
+                      <p className="text-sm text-gray-500 mt-2">
+                        <span className="font-medium">Observação:</span> {registro.observacao}
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xs text-gray-500">
+                      {formatarData(registro.data)}
+                    </span>
+                    <div className="mt-1">
+                      <span className="bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs font-medium">
+                        Retirada
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {historico.filter(registro => registro.tipo === 'saida' && registro.responsavel).length === 0 && (
+              <div className="text-center py-8">
+                <Users className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                <p className="text-gray-500">Nenhuma retirada registrada ainda.</p>
+                <p className="text-sm text-gray-400 mt-1">
+                  Use a aba "Movimentação" para registrar saídas com responsável.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Aba Histórico */}
+      {aba === 'historico' && (
+        <div>
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold">Histórico de Movimentações</h3>
+            
+            {/* Filtros do histórico */}
+            <div className="flex space-x-2">
+              <select
+                value={filtros.tipo}
+                onChange={(e) => setFiltros({...filtros, tipo: e.target.value})}
+                className={`px-3 py-1 border rounded-md text-sm ${inputClass}`}
+              >
+                <option value="">Todos os tipos</option>
+                <option value="entrada">Entradas</option>
+                <option value="saida">Saídas</option>
+                <option value="estoque_inicial">Estoque Inicial</option>
+              </select>
+              <input
+                type="date"
+                value={filtros.dataInicio}
+                onChange={(e) => setFiltros({...filtros, dataInicio: e.target.value})}
+                className={`px-3 py-1 border rounded-md text-sm ${inputClass}`}
+              />
+              <input
+                type="date"
+                value={filtros.dataFim}
+                onChange={(e) => setFiltros({...filtros, dataFim: e.target.value})}
+                className={`px-3 py-1 border rounded-md text-sm ${inputClass}`}
+              />
+              <button
+                onClick={() => setFiltros({ categoria: '', dataInicio: '', dataFim: '', responsavel: '', tipo: '' })}
+                className="px-3 py-1 bg-gray-500 text-white rounded-md text-sm hover:bg-gray-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          
+          <div className="space-y-3">
+            {aplicarFiltros(historico).slice().reverse().map(registro => (
+              <div key={registro.id} className={`border rounded-lg p-4 ${cardClass}`}>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h4 className="font-medium">{registro.materialNome} ({registro.materialCodigo})</h4>
+                    <div className="flex items-center mt-1">
+                      {registro.tipo === 'entrada' ? (
+                        <TrendingUp className="w-4 h-4 text-green-600 mr-1" />
+                      ) : registro.tipo === 'saida' ? (
+                        <TrendingDown className="w-4 h-4 text-red-600 mr-1" />
+                      ) : (
+                        <Package className="w-4 h-4 text-blue-600 mr-1" />
+                      )}
+                      <span className={`text-sm font-medium ${
+                        registro.tipo === 'entrada' ? 'text-green-600' : 
+                        registro.tipo === 'saida' ? 'text-red-600' : 'text-blue-600'
+                      }`}>
+                        {registro.tipo === 'entrada' ? 'Entrada' : 
+                         registro.tipo === 'saida' ? 'Saída' : 'Estoque Inicial'}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Quantidade: {registro.quantidade} | 
+                      Antes: {registro.quantidadeAnterior} → Depois: {registro.quantidadeAtual}
+                    </p>
+                    {registro.responsavel && (
+                      <p className="text-sm text-blue-600 mt-1 font-medium">
+                        <User className="w-3 h-3 inline mr-1" />
+                        {registro.responsavel}
+                      </p>
+                    )}
+                    {registro.observacao && (
+                      <p className="text-sm text-gray-500 mt-1">{registro.observacao}</p>
+                    )}
+                  </div>
+                  <span className="text-xs text-gray-500">
+                    {formatarData(registro.data)}
+                  </span>
+                </div>
+              </div>
+            ))}
+            {aplicarFiltros(historico).length === 0 && (
+              <p className="text-gray-500 text-center py-8">Nenhuma movimentação encontrada com os filtros aplicados.</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Aba Relatórios */}
+      {aba === 'relatorios' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Relatório de consumo por categoria */}
+            <div className={`p-6 rounded-lg ${cardClass}`}>
+              <h3 className="text-lg font-semibold mb-4">Consumo por Categoria (Últimos 30 dias)</h3>
+              <div className="space-y-3">
+                {categorias.map(categoria => {
+                  const consumo = historico
+                    .filter(h => {
+                      const material = materiais.find(m => m.id === h.materialId);
+                      const dataRecente = new Date(h.data) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+                      return material?.categoria === categoria && h.tipo === 'saida' && dataRecente;
+                    })
+                    .reduce((acc, h) => acc + h.quantidade, 0);
+                    
+                  if (consumo > 0) {
+                    return (
+                      <div key={categoria} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded">
+                        <span className="font-medium">{categoria}</span>
+                        <span className="font-bold text-lg">{consumo} unidades</span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
+              </div>
+            </div>
+
+            {/* Relatório de responsáveis */}
+            <div className={`p-6 rounded-lg ${cardClass}`}>
+              <h3 className="text-lg font-semibold mb-4">Top Responsáveis por Retiradas</h3>
+              <div className="space-y-3">
+                {Object.entries(
+                  historico
+                    .filter(h => h.tipo === 'saida' && h.responsavel)
+                    .reduce((acc, h) => {
+                      acc[h.responsavel] = (acc[h.responsavel] || 0) + h.quantidade;
+                      return acc;
+                    }, {})
+                )
+                .sort(([,a], [,b]) => b - a)
+                .slice(0, 5)
+                .map(([responsavel, total], index) => (
+                  <div key={responsavel} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded">
+                    <div className="flex items-center">
+                      <span className="font-bold text-lg mr-3 text-blue-600">#{index + 1}</span>
+                      <span className="font-medium">{responsavel}</span>
+                    </div>
+                    <span className="font-bold text-lg">{total} itens</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Relatório de necessidade de reposição */}
+          <div className={`p-6 rounded-lg ${cardClass}`}>
+            <h3 className="text-lg font-semibold mb-4">Lista de Reposição Necessária</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left p-2">Código</th>
+                    <th className="text-left p-2">Material</th>
+                    <th className="text-left p-2">Categoria</th>
+                    <th className="text-left p-2">Estoque Atual</th>
+                    <th className="text-left p-2">Estoque Mínimo</th>
+                    <th className="text-left p-2">Sugestão de Compra</th>
+                    <th className="text-left p-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {materiais
+                    .filter(m => m.quantidade <= m.estoqueMinimo)
+                    .map(material => (
+                      <tr key={material.id} className="border-b">
+                        <td className="p-2 font-mono">{material.codigo}</td>
+                        <td className="p-2 font-medium">{material.nome}</td>
+                        <td className="p-2">{material.categoria}</td>
+                        <td className="p-2 text-center">{material.quantidade}</td>
+                        <td className="p-2 text-center">{material.estoqueMinimo}</td>
+                        <td className="p-2 text-center font-bold">
+                          {Math.max(material.estoqueMinimo * 2 - material.quantidade, material.estoqueMinimo)}
+                        </td>
+                        <td className="p-2">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            material.quantidade === 0 ? 'bg-red-100 text-red-800' :
+                            material.quantidade <= 2 ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-orange-100 text-orange-800'
+                          }`}>
+                            {material.quantidade === 0 ? 'URGENTE' :
+                             material.quantidade <= 2 ? 'ALTO' : 'MÉDIO'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmação de deleção */}
+      {modalConfirmacao.ativo && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className={`p-6 rounded-lg max-w-md w-full mx-4 ${cardClass}`}>
+            <h3 className="text-lg font-semibold mb-4">Confirmar Deleção</h3>
+            <p className="text-gray-600 mb-6">
+              Tem certeza que deseja deletar este material? Esta ação não pode ser desfeita.
+            </p>
+            <div className="flex space-x-3">
+              <button
+                onClick={deletarMaterial}
+                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+              >
+                <Trash2 className="w-4 h-4 inline mr-2" />
+                Deletar
+              </button>
+              <button
+                onClick={() => setModalConfirmacao({ ativo: false, materialId: null })}
+                className="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de edição */}
+      {materialEditando && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className={`p-6 rounded-lg max-w-md w-full mx-4 ${cardClass}`}>
+            <h3 className="text-lg font-semibold mb-4">Editar Material</h3>
+            <div className="space-y-4">
+              <input
+                type="text"
+                placeholder="Nome do material"
+                value={materialEditando.nome}
+                onChange={(e) => setMaterialEditando({...materialEditando, nome: e.target.value})}
+                className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+              />
+              <select
+                value={materialEditando.categoria}
+                onChange={(e) => setMaterialEditando({...materialEditando, categoria: e.target.value})}
+                className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+              >
+                {categorias.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                placeholder="Código"
+                value={materialEditando.codigo}
+                onChange={(e) => setMaterialEditando({...materialEditando, codigo: e.target.value})}
+                className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+              />
+              <input
+                type="number"
+                placeholder="Estoque mínimo"
+                value={materialEditando.estoqueMinimo}
+                onChange={(e) => setMaterialEditando({...materialEditando, estoqueMinimo: parseInt(e.target.value)})}
+                className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${inputClass}`}
+              />
+            </div>
+            <div className="flex space-x-3 mt-6">
+              <button
+                onClick={salvarEdicao}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              >
+                <Save className="w-4 h-4 inline mr-2" />
+                Salvar
+              </button>
+              <button
+                onClick={() => setMaterialEditando(null)}
+                className="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default ControleEstoque;
